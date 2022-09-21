@@ -5,6 +5,7 @@ using System.Text;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.IO.Compression;
+using ICSharpCode.SharpZipLib.Zip.Compression;
 using ICSharpCode.SharpZipLib.Zip.Compression.Streams;
 using System.Globalization;
 
@@ -53,6 +54,8 @@ namespace FFXIII_Injector
             public int DecompressedSize;
 
             public int CompressedSize;
+
+            public string FilePath;
         }
         private struct ChunkInfoEntry
         {
@@ -113,11 +116,12 @@ namespace FFXIII_Injector
                     header.FileInfos[i].WhiteData.Address = int.Parse(infos[0], NumberStyles.HexNumber);
                     header.FileInfos[i].WhiteData.DecompressedSize = int.Parse(infos[1], NumberStyles.HexNumber);
                     header.FileInfos[i].WhiteData.CompressedSize = int.Parse(infos[2], NumberStyles.HexNumber);
+                    header.FileInfos[i].WhiteData.FilePath = infos[3];
                 }
             }
             return header;
         }
-        public static byte[] Decompress(byte[] data)
+        private static byte[] Decompress(byte[] data)
         {
             var outputStream = new MemoryStream();
             using (var compressedStream = new MemoryStream(data))
@@ -128,14 +132,67 @@ namespace FFXIII_Injector
                 return outputStream.ToArray();
             }
         }
-        public static void Inject(string filelist, string white)
+        private static byte[] Compress(byte[] input)
         {
-            using (var stream = File.OpenRead(filelist))
+            byte[] size = BitConverter.GetBytes(Convert.ToUInt32(input.Length));
+            Deflater compressor = new Deflater();
+            compressor.SetLevel(Deflater.BEST_COMPRESSION);
+            compressor.SetInput(input);
+            compressor.Finish();
+            MemoryStream bos = new MemoryStream(input.Length);
+            byte[] buf = new byte[1024];
+            while (!compressor.IsFinished)
+            {
+                int count = compressor.Deflate(buf);
+                bos.Write(buf, 0, count);
+            }
+            MemoryStream result = new MemoryStream();
+            BinaryWriter bw = new BinaryWriter(result);
+            bw.Write(size);
+            bw.Write(bos.ToArray());
+            bw.Close();
+            return result.ToArray();
+        }
+        public static void Inject(string filelist, string white, string dir)
+        {
+            using (var stream = File.Open(filelist, FileMode.Open, FileAccess.ReadWrite))
             {
                 var br = new BinaryReader(stream);
                 FilelistHeader header = ReadHeader(ref br);
-                
+                string[] files = Directory.GetFiles(dir, "*.*", SearchOption.AllDirectories);
+                using (var fs = File.Open(white, FileMode.Open, FileAccess.Write))
+                {
+                    using (var bw = new BinaryWriter(fs))
+                    {
+                        foreach (var file in files)
+                        {
+                            string wpath = file.Replace(dir, "").Replace("\\", "/").TrimStart('/');
+                            int index = Array.FindIndex(header.FileInfos, f => f.WhiteData.FilePath == wpath);
+                            if (index < 0) continue;
+                            byte[] data = File.ReadAllBytes(file);
+                            byte[] compressed = header.FileInfos[index].WhiteData.CompressedSize == header.FileInfos[index].WhiteData.DecompressedSize ?
+                                data : Compress(data);
+                            bw.BaseStream.Position = data.Length > header.FileInfos[index].WhiteData.CompressedSize ?
+                                bw.BaseStream.Length : (header.FileInfos[index].WhiteData.Address * 0x800);
+                            header.FileInfos[index].WhiteData.Address = (int)bw.BaseStream.Position / 0x800;
+                            header.FileInfos[index].WhiteData.DecompressedSize = data.Length;
+                            header.FileInfos[index].WhiteData.CompressedSize = compressed.Length;
+                            bw.Write(compressed);
+                            if (compressed.Length % 0x800 != 0)
+                            {
+                                bw.Write(new byte[0x800 - (compressed.Length % 0x800)]);
+                            }
+                        }
+                    }
+                }
                 br.Close();
+                using (var mstream = new MemoryStream())
+                {
+                    using (var bw = new BinaryWriter(mstream))
+                    {
+
+                    }
+                }
             }
         }
     }
