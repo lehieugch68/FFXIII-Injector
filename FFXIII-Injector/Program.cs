@@ -10,11 +10,10 @@ namespace FFXIII_Injector
     {
         static void Main(string[] args)
         {
-            //Injector.Inject(@"D:\VietHoaGame\FF13-2\mod\Utilities\filelist_scrc.win32.bin", "");
-            string[] files = Directory.GetFiles(@"D:\VietHoaGame\Lightning Returns\Cocoon\Data", "*.*", SearchOption.AllDirectories).Select(s => s.Replace(@"D:\VietHoaGame\Lightning Returns\Cocoon\Data\", "").Replace("\\", "/")).ToArray();
-            foreach (var file in files)
+            //filelist white repackdir
+            if (args.Length >= 3)
             {
-                Console.WriteLine(file);
+                Injector.Inject(args[0], args[1], args[2]);
             }
             Console.ReadKey();
         }
